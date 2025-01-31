@@ -1,5 +1,9 @@
 import React, { useState } from "react";
-import Select from "react-select";
+import FileUploader from "./components/FileUploader.jsx";
+import HeadOfStaffSelector from "./components/HeadOfStaffSelector.jsx";
+import WorkerSelector from "./components/WorkerSelector.jsx";
+import WorkerTable from "./components/WorkerTable.jsx";
+import StatsDisplay from "./components/StatsDisplay.jsx";
 
 export default function App() {
     const [data, setData] = useState([]);
@@ -12,7 +16,9 @@ export default function App() {
     const [staffWorkers, setStaffWorkers] = useState([]);
     const [averageHoursPerWorker, setAverageHoursPerWorker] = useState(null);
     const [averageWorkerWorkload, setAverageWorkerWorkload] = useState(null);
+    const [workerWorkload, setWorkerWorkload] = useState(null);
 
+    // Load Excel Data
     const openFileDialog = async () => {
         const filePath = await window.electron.openFileDialog();
         if (!filePath) return;
@@ -21,18 +27,23 @@ export default function App() {
         if (jsonData) {
             setData(jsonData);
 
-            // Extract unique "ראש צוות" names for dropdown
-            const uniqueStaffNames = [...new Set(jsonData.map(row => row["ראש צוות"]))].filter(Boolean);
-            const staffOptions = uniqueStaffNames.map(name => ({ value: name, label: name }));
-            setHeadOfStaffOptions(staffOptions);
+            // Ensure unique dropdown options are set
+            setHeadOfStaffOptions(
+                [...new Set(jsonData.map(row => row["ראש צוות"]?.trim()))] // ✅ Safe access with `?.trim()`
+                    .filter(Boolean) // ✅ Remove empty values
+                    .map(name => ({ value: name, label: name }))
+            );
 
-            // Extract unique "שם העובד" names for dropdown
-            const uniqueWorkerNames = [...new Set(jsonData.map(row => row["שם העובד"]))].filter(Boolean);
-            const workerOptions = uniqueWorkerNames.map(name => ({ value: name, label: name }));
-            setWorkerOptions(workerOptions);
+            setWorkerOptions(
+                [...new Set(jsonData.map(row => row["שם העובד"]?.trim()))] // ✅ Safe access with `?.trim()`
+                    .filter(Boolean) // ✅ Remove empty values
+                    .map(name => ({ value: name, label: name }))
+            );
         }
     };
 
+
+    // ✅ Restored: Calculate Total Hours for Head of Staff
     const calculateTotalHoursForStaff = () => {
         if (!selectedHeadOfStaff) {
             alert("Please select a ראש צוות (Head of Staff).");
@@ -50,18 +61,16 @@ export default function App() {
             return;
         }
 
-        // Calculate total hours for the head of staff
+        // Calculate total hours
         const totalTeamHours = filteredRows.reduce((sum, row) => {
             const bankHours = parseFloat(row["בנק (שעות שלא נופקו)"]) || 0;
             const systemHours = parseFloat(row["מערכת תכנון שעות"]) || 0;
             return sum + bankHours + systemHours;
         }, 0);
-
         setTotalHoursStaff(totalTeamHours);
 
-        // Count unique workers & calculate their individual hours
+        // Calculate worker breakdown
         const workerMap = new Map();
-
         filteredRows.forEach(row => {
             const workerName = row["שם העובד"];
             if (!workerName) return;
@@ -70,31 +79,22 @@ export default function App() {
             const systemHours = parseFloat(row["מערכת תכנון שעות"]) || 0;
             const workerTotal = bankHours + systemHours;
 
-            if (workerMap.has(workerName)) {
-                workerMap.set(workerName, workerMap.get(workerName) + workerTotal);
-            } else {
-                workerMap.set(workerName, workerTotal);
-            }
+            workerMap.set(workerName, (workerMap.get(workerName) || 0) + workerTotal);
         });
 
-        // Convert to an array [{ worker: name, hours: total }]
+        // Convert to array for display
         const workersList = Array.from(workerMap, ([worker, hours]) => ({
             worker,
             hours,
-            workload: (hours / 2000) * 100, // Calculate workload in percentage
+            workload: (hours / 2000) * 100, // Workload as percentage
         }));
 
         setStaffWorkers(workersList);
-
-        // Calculate team average hours per worker
-        const totalWorkers = workersList.length;
-        const avgHours = totalWorkers > 0 ? totalTeamHours / totalWorkers : 0;
-        setAverageHoursPerWorker(avgHours);
-
-        // Calculate average worker workload
-        setAverageWorkerWorkload((avgHours / 2000) * 100);
+        setAverageHoursPerWorker(totalTeamHours / (workersList.length || 1));
+        setAverageWorkerWorkload((totalTeamHours / (workersList.length || 1)) / 2000 * 100);
     };
 
+    // ✅ Restored: Calculate Total Hours for Worker
     const calculateTotalHoursForWorker = () => {
         if (!selectedWorker) {
             alert("Please select a שם העובד (Worker).");
@@ -106,10 +106,11 @@ export default function App() {
         if (filteredRows.length === 0) {
             alert(`No data found for שם העובד: ${selectedWorker.label}`);
             setTotalHoursWorker(null);
+            setWorkerWorkload(null);
             return;
         }
 
-        // Summing columns J ("בנק (שעות שלא נופקו)") & K ("מערכת תכנון שעות")
+        // Summing relevant hours
         const total = filteredRows.reduce((sum, row) => {
             const bankHours = parseFloat(row["בנק (שעות שלא נופקו)"]) || 0;
             const systemHours = parseFloat(row["מערכת תכנון שעות"]) || 0;
@@ -117,102 +118,64 @@ export default function App() {
         }, 0);
 
         setTotalHoursWorker(total);
+        setWorkerWorkload((total / 2000) * 100); // Compute workload
     };
 
     return (
         <div className="p-5">
             <h1 className="font-bold text-xl mb-4">Calculate Total Hours</h1>
 
-            <button
-                onClick={openFileDialog}
-                className="text-white bg-green-500 p-2 rounded mb-4 hover:bg-green-700 transition duration-300"
-            >
-                Select Excel File
-            </button>
+            {/* File Uploader */}
+            <FileUploader openFileDialog={openFileDialog} />
 
-            {/* Head of Staff Selection */}
-            {headOfStaffOptions.length > 0 && (
-                <div className="mb-4">
-                    <label className="block font-bold">Select ראש צוות (Head of Staff):</label>
-                    <Select
-                        options={headOfStaffOptions}
-                        value={selectedHeadOfStaff}
-                        onChange={setSelectedHeadOfStaff}
-                        placeholder="Select a Head of Staff"
-                        isSearchable
-                        className="w-64"
+            {/* 🛠 Only Show Components If Data is Loaded */}
+            {data.length > 0 && (
+                <>
+                    {/* Head of Staff Selection */}
+                    <HeadOfStaffSelector
+                        headOfStaffOptions={headOfStaffOptions}
+                        selectedHeadOfStaff={selectedHeadOfStaff}
+                        setSelectedHeadOfStaff={setSelectedHeadOfStaff}
+                        calculateTotalHoursForStaff={calculateTotalHoursForStaff}
                     />
-                    <button
-                        onClick={calculateTotalHoursForStaff}
-                        className="text-white bg-blue-500 p-2 rounded mt-2 hover:bg-blue-700 transition duration-300"
-                    >
-                        Calculate Total Hours for Head of Staff
-                    </button>
-                </div>
-            )}
 
-            {totalHoursStaff !== null && (
-                <div className="mt-4">
-                    <h2 className="font-bold text-lg">
-                        Total Hours for {selectedHeadOfStaff.label}:
-                        <span className="text-blue-500"> {totalHoursStaff}</span>
-                    </h2>
-                    <h3 className="font-bold mt-2">Number of Unique Workers: <span className="text-blue-500">{staffWorkers.length}</span>
-                    </h3>
-                    <h3 className="font-bold mt-2">Average Working Hours: <span className="text-blue-500">{averageHoursPerWorker.toFixed(2)}</span>
-                    </h3>
-                    <h3 className="font-bold mt-2">Average Worker Workload: <span className="text-blue-500">{averageWorkerWorkload.toFixed(2)}%</span>
-                    </h3>
-
-                    {staffWorkers.length > 0 && (
-                        <table className="border-collapse border border-gray-500 w-full mt-4">
-                            <thead>
-                            <tr>
-                                <th className="border border-gray-400 p-2">Worker Name</th>
-                                <th className="border border-gray-400 p-2">Total Hours</th>
-                                <th className="border border-gray-400 p-2">Workload (%)</th>
-                            </tr>
-                            </thead>
-                            <tbody>
-                            {staffWorkers.map(({ worker, hours, workload }) => (
-                                <tr key={worker} className="border border-gray-400">
-                                    <td className="border border-gray-400 p-2">{worker}</td>
-                                    <td className="border border-gray-400 p-2">{hours.toFixed(2)}</td>
-                                    <td className="border border-gray-400 p-2">{workload.toFixed(2)}%</td>
-                                </tr>
-                            ))}
-                            </tbody>
-                        </table>
+                    {/* Stats for Head of Staff */}
+                    {totalHoursStaff !== null && (
+                        <StatsDisplay
+                            selectedHeadOfStaff={selectedHeadOfStaff}
+                            totalHoursStaff={totalHoursStaff}
+                            staffWorkers={staffWorkers}
+                            averageHoursPerWorker={averageHoursPerWorker}
+                            averageWorkerWorkload={averageWorkerWorkload}
+                        />
                     )}
-                </div>
-            )}
 
-            {/* Worker Selection */}
-            {workerOptions.length > 0 && (
-                <div className="mb-4">
-                    <label className="block font-bold">Select שם העובד (Worker):</label>
-                    <Select
-                        options={workerOptions}
-                        value={selectedWorker}
-                        onChange={setSelectedWorker}
-                        placeholder="Select a Worker"
-                        isSearchable
-                        className="w-64"
+                    {/* Worker Table */}
+                    <WorkerTable staffWorkers={staffWorkers} />
+
+                    {/* Worker Selection */}
+                    <WorkerSelector
+                        workerOptions={workerOptions}
+                        selectedWorker={selectedWorker}
+                        setSelectedWorker={setSelectedWorker}
+                        calculateTotalHoursForWorker={calculateTotalHoursForWorker}
                     />
-                    <button
-                        onClick={calculateTotalHoursForWorker}
-                        className="text-white bg-purple-500 p-2 rounded mt-2 hover:bg-purple-700 transition duration-300"
-                    >
-                        Calculate Total Hours for Worker
-                    </button>
-                </div>
-            )}
 
+                    {/* Display Worker Total Hours */}
+                    {totalHoursWorker !== null && selectedWorker && (
+                        <div className="mt-4">
+                            <h2 className="font-bold text-lg">
+                                Total Hours for {selectedWorker.label}:
+                                <span className="text-purple-500"> {totalHoursWorker}</span>
+                            </h2>
+                            <h3 className="font-bold mt-2">
+                                Workload: <span className="text-purple-500">{workerWorkload.toFixed(2)}%</span>
+                            </h3>
+                        </div>
+                    )}
 
-            {totalHoursWorker !== null && selectedWorker && (
-                <h2 className="font-bold text-lg mt-4">
-                    Total Hours for {selectedWorker.label}:
-                    <span className="text-purple-500"> {totalHoursWorker}</span>
-                </h2>
+                </>
             )}
-        </div>)};
+        </div>
+    );
+}

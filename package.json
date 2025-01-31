@@ -1,6 +1,6 @@
 {
-  "name": "electronreacttailwindtamplate",
-  "productName": "counter App",
+  "name": "pakamanegment",
+  "productName": "PAKA Manegment",
   "version": "1.0.0",
   "description": "Lampel App",
   "main": ".webpack/main",
