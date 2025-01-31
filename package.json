@@ -1,8 +1,8 @@
 {
   "name": "electronreacttailwindtamplate",
-  "productName": "electronreacttailwindtamplate",
+  "productName": "counter App",
   "version": "1.0.0",
-  "description": "My Electron application description",
+  "description": "Lampel App",
   "main": ".webpack/main",
   "scripts": {
     "start": "electron-forge start",
