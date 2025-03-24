@@ -5,6 +5,10 @@ module.exports = {
    */
   entry: './src/main.js',
   // Put your normal webpack config below here
+  externals: {
+    'csv-parse/sync': 'commonjs2 csv-parse/sync',
+    'worker_threads': 'commonjs2 worker_threads',
+  },
   module: {
     rules: require('./webpack.rules'),
   },

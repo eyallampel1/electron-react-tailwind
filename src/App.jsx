@@ -1,181 +1,100 @@
-import React, { useState } from "react";
-import FileUploader from "./components/FileUploader.jsx";
-import HeadOfStaffSelector from "./components/HeadOfStaffSelector.jsx";
-import WorkerSelector from "./components/WorkerSelector.jsx";
-import WorkerTable from "./components/WorkerTable.jsx";
-import StatsDisplay from "./components/StatsDisplay.jsx";
+import React, {useEffect, useState} from "react";
 
 export default function App() {
-    const [data, setData] = useState([]);
-    const [headOfStaffOptions, setHeadOfStaffOptions] = useState([]);
-    const [workerOptions, setWorkerOptions] = useState([]);
-    const [selectedHeadOfStaff, setSelectedHeadOfStaff] = useState(null);
-    const [selectedWorker, setSelectedWorker] = useState(null);
-    const [totalHoursStaff, setTotalHoursStaff] = useState(null);
-    const [totalHoursWorker, setTotalHoursWorker] = useState(null);
-    const [staffWorkers, setStaffWorkers] = useState([]);
-    const [averageHoursPerWorker, setAverageHoursPerWorker] = useState(null);
-    const [averageWorkerWorkload, setAverageWorkerWorkload] = useState(null);
-    const [workerWorkload, setWorkerWorkload] = useState(null);
+    const [status, setStatus] = useState("Waiting for file...");
+    const [isProcessing, setIsProcessing] = useState(false);
+    const [progress, setProgress] = useState({ count: 0, total: 0 });
+    const [logMessages, setLogMessages] = useState([]);
 
-    // Load Excel Data
-    const openFileDialog = async () => {
-        const filePath = await window.electron.openFileDialog();
-        if (!filePath) return;
-
-        const jsonData = await window.electron.readExcelFile(filePath);
-        if (jsonData) {
-            setData(jsonData);
-
-            // Ensure unique dropdown options are set
-            setHeadOfStaffOptions(
-                [...new Set(jsonData.map(row => row["ראש צוות"]?.trim()))] // ✅ Safe access with `?.trim()`
-                    .filter(Boolean) // ✅ Remove empty values
-                    .map(name => ({ value: name, label: name }))
-            );
-
-            setWorkerOptions(
-                [...new Set(jsonData.map(row => row["שם העובד"]?.trim()))] // ✅ Safe access with `?.trim()`
-                    .filter(Boolean) // ✅ Remove empty values
-                    .map(name => ({ value: name, label: name }))
-            );
-        }
-    };
-
-
-    // ✅ Restored: Calculate Total Hours for Head of Staff
-    const calculateTotalHoursForStaff = () => {
-        if (!selectedHeadOfStaff) {
-            alert("Please select a ראש צוות (Head of Staff).");
-            return;
-        }
-
-        const filteredRows = data.filter(row => row["ראש צוות"] === selectedHeadOfStaff.value);
-
-        if (filteredRows.length === 0) {
-            alert(`No data found for ראש צוות: ${selectedHeadOfStaff.label}`);
-            setTotalHoursStaff(null);
-            setStaffWorkers([]);
-            setAverageHoursPerWorker(null);
-            setAverageWorkerWorkload(null);
-            return;
-        }
-
-        // Calculate total hours
-        const totalTeamHours = filteredRows.reduce((sum, row) => {
-            const bankHours = parseFloat(row["בנק (שעות שלא נופקו)"]) || 0;
-            const systemHours = parseFloat(row["מערכת תכנון שעות"]) || 0;
-            return sum + bankHours + systemHours;
-        }, 0);
-        setTotalHoursStaff(totalTeamHours);
-
-        // Calculate worker breakdown
-        const workerMap = new Map();
-        filteredRows.forEach(row => {
-            const workerName = row["שם העובד"];
-            if (!workerName) return;
-
-            const bankHours = parseFloat(row["בנק (שעות שלא נופקו)"]) || 0;
-            const systemHours = parseFloat(row["מערכת תכנון שעות"]) || 0;
-            const workerTotal = bankHours + systemHours;
-
-            workerMap.set(workerName, (workerMap.get(workerName) || 0) + workerTotal);
+    useEffect(() => {
+        window.electron.onProgressUpdate(({ count, total }) => {
+            setProgress({ count, total });
         });
 
-        // Convert to array for display
-        const workersList = Array.from(workerMap, ([worker, hours]) => ({
-            worker,
-            hours,
-            workload: (hours / 2000) * 100, // Workload as percentage
-        }));
+        window.electron.onLogUpdate((msg) => {
+            setLogMessages(prev => [...prev, msg]);
+        });
+    }, []);
 
-        setStaffWorkers(workersList);
-        setAverageHoursPerWorker(totalTeamHours / (workersList.length || 1));
-        setAverageWorkerWorkload((totalTeamHours / (workersList.length || 1)) / 2000 * 100);
-    };
+    React.useEffect(() => {
+        window.electron.onProgressUpdate(({ count, total }) => {
+            setProgress({ count, total });
+        });
+    }, []);
 
-    // ✅ Restored: Calculate Total Hours for Worker
-    const calculateTotalHoursForWorker = () => {
-        if (!selectedWorker) {
-            alert("Please select a שם העובד (Worker).");
+
+    const handleCsvUpload = async () => {
+        setStatus("Opening file dialog...");
+        const filePath = await window.electron.openFileDialog();
+
+        if (!filePath) {
+            setStatus("No file selected.");
             return;
         }
 
-        const filteredRows = data.filter(row => row["שם העובד"] === selectedWorker.value);
+        setStatus("Processing CSV...");
+        setIsProcessing(true);
 
-        if (filteredRows.length === 0) {
-            alert(`No data found for שם העובד: ${selectedWorker.label}`);
-            setTotalHoursWorker(null);
-            setWorkerWorkload(null);
-            return;
+        const result = await window.electron.generateFromCsv(filePath);
+
+        if (result?.success) {
+            setStatus(result.message || "✅ All done!");
+        } else {
+            setStatus("❌ Error: " + (result?.message || "Unknown error"));
         }
 
-        // Summing relevant hours
-        const total = filteredRows.reduce((sum, row) => {
-            const bankHours = parseFloat(row["בנק (שעות שלא נופקו)"]) || 0;
-            const systemHours = parseFloat(row["מערכת תכנון שעות"]) || 0;
-            return sum + bankHours + systemHours;
-        }, 0);
 
-        setTotalHoursWorker(total);
-        setWorkerWorkload((total / 2000) * 100); // Compute workload
+        setIsProcessing(false);
     };
 
     return (
-        <div className="p-5">
-            <h1 className="font-bold text-xl mb-4">Calculate Total Hours</h1>
+        <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+            <div className="bg-white shadow-md rounded-lg p-8 max-w-md w-full text-center">
+                <h1 className="text-2xl font-bold mb-4 text-gray-800">
+                    EasyEDA LCSC Symbol Generator
+                </h1>
+                <p className="text-gray-600 mb-6">
+                    Select a CSV BOM file and generate symbols using
+                    <br />
+                    <code>easyeda2kicad.exe --full --lcsc_id=XXX</code>
+                </p>
+                <button
+                    onClick={handleCsvUpload}
+                    disabled={isProcessing}
+                    className={`px-6 py-3 font-medium rounded text-white ${
+                        isProcessing ? "bg-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"
+                    }`}
+                >
+                    {isProcessing ? `Processing... (${progress.count}/${progress.total})` : "Select CSV and Run"}
+                </button>
 
-            {/* File Uploader */}
-            <FileUploader openFileDialog={openFileDialog} />
+                {isProcessing && (
+                    <div className="w-full bg-gray-200 rounded-full h-4 mt-4 overflow-hidden">
+                        <div
+                            className="bg-green-500 h-4 transition-all duration-200"
+                            style={{
+                                width:
+                                    progress.total > 0
+                                        ? `${Math.round((progress.count / progress.total) * 100)}%`
+                                        : "0%",
+                            }}
+                        ></div>
+                    </div>
+                )}
 
-            {/* 🛠 Only Show Components If Data is Loaded */}
-            {data.length > 0 && (
-                <>
-                    {/* Head of Staff Selection */}
-                    <HeadOfStaffSelector
-                        headOfStaffOptions={headOfStaffOptions}
-                        selectedHeadOfStaff={selectedHeadOfStaff}
-                        setSelectedHeadOfStaff={setSelectedHeadOfStaff}
-                        calculateTotalHoursForStaff={calculateTotalHoursForStaff}
-                    />
+                {isProcessing && (
+                    <div className="mt-4 max-h-48 overflow-y-auto bg-gray-100 p-3 rounded text-left text-sm border border-gray-300">
+                        {logMessages.map((msg, index) => (
+                            <div key={index} className="font-mono">{msg}</div>
+                        ))}
+                    </div>
+                )}
 
-                    {/* Stats for Head of Staff */}
-                    {totalHoursStaff !== null && (
-                        <StatsDisplay
-                            selectedHeadOfStaff={selectedHeadOfStaff}
-                            totalHoursStaff={totalHoursStaff}
-                            staffWorkers={staffWorkers}
-                            averageHoursPerWorker={averageHoursPerWorker}
-                            averageWorkerWorkload={averageWorkerWorkload}
-                        />
-                    )}
 
-                    {/* Worker Table */}
-                    <WorkerTable staffWorkers={staffWorkers} />
-
-                    {/* Worker Selection */}
-                    <WorkerSelector
-                        workerOptions={workerOptions}
-                        selectedWorker={selectedWorker}
-                        setSelectedWorker={setSelectedWorker}
-                        calculateTotalHoursForWorker={calculateTotalHoursForWorker}
-                    />
-
-                    {/* Display Worker Total Hours */}
-                    {totalHoursWorker !== null && selectedWorker && (
-                        <div className="mt-4">
-                            <h2 className="font-bold text-lg">
-                                Total Hours for {selectedWorker.label}:
-                                <span className="text-purple-500"> {totalHoursWorker}</span>
-                            </h2>
-                            <h3 className="font-bold mt-2">
-                                Workload: <span className="text-purple-500">{workerWorkload.toFixed(2)}%</span>
-                            </h3>
-                        </div>
-                    )}
-
-                </>
-            )}
+                <div className="mt-4 text-sm text-gray-700 whitespace-pre-wrap">
+                    {status}
+                </div>
+            </div>
         </div>
     );
 }

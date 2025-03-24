@@ -1,7 +1,8 @@
 const { app, BrowserWindow, dialog, ipcMain } = require("electron");
-const path = require("node:path");
+const path = require("path");
 const fs = require("fs");
 const XLSX = require("xlsx");
+const { Worker } = require("worker_threads");
 
 if (require("electron-squirrel-startup")) {
   app.quit();
@@ -27,7 +28,7 @@ const createWindow = () => {
 ipcMain.handle("open-file-dialog", async () => {
   const result = await dialog.showOpenDialog({
     properties: ["openFile"],
-    filters: [{ name: "Excel Files", extensions: ["xlsx", "xls","xlsm"] }],
+    filters: [{ name: "Excel Files", extensions: ["csv","xlsx", "xls","xlsm"] }],
   });
 
   return result.filePaths[0] || null;
@@ -66,6 +67,47 @@ ipcMain.handle("read-excel-file", async (_, filePath) => {
   }
 });
 
+const { parse } = require("csv-parse/sync");
+const { execSync } = require("child_process");
+// Handle running easyeda2kicad for each LCSC Part in a CSV
+ipcMain.handle("generate-from-csv", async (event, filePath) => {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(
+        path.resolve(app.getAppPath(), "src/generateWorker.js"), {
+          workerData: { filePath },
+        }
+    );
+
+
+    worker.on("message", (msg) => {
+      if (msg.type === "progress") {
+        event.sender.send("progress-update", {
+          count: msg.count,
+          total: msg.total,
+        });
+      } else if (msg.type === "log") {
+        event.sender.send("log-update", msg.message); // 🆕
+      } else if (msg.type === "done") {
+        resolve({
+          success: true,
+          message: `✅ ${msg.addedCount} added\n⚠️ ${msg.alreadyExistsCount} already existed\n❌ ${msg.errorCount} errors`,
+        });
+      }
+    });
+
+
+    worker.on("error", (err) => {
+      console.error("Worker error:", err);
+      reject({ success: false, message: "Worker thread failed" });
+    });
+
+    worker.on("exit", (code) => {
+      if (code !== 0) {
+        reject({ success: false, message: `Worker stopped with code ${code}` });
+      }
+    });
+  });
+});
 
 
 app.whenReady().then(() => {
