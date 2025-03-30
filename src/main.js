@@ -3,6 +3,7 @@ const path = require("path");
 const fs = require("fs");
 const XLSX = require("xlsx");
 const { Worker } = require("worker_threads");
+let currentWorker = null;
 
 if (require("electron-squirrel-startup")) {
   app.quit();
@@ -72,22 +73,19 @@ const { execSync } = require("child_process");
 // Handle running easyeda2kicad for each LCSC Part in a CSV
 ipcMain.handle("generate-from-csv", async (event, filePath) => {
   return new Promise((resolve, reject) => {
-    const worker = new Worker(
-        path.resolve(app.getAppPath(), "src/generateWorker.js"), {
-          workerData: { filePath },
-        }
-    );
+    currentWorker = new Worker(path.resolve(app.getAppPath(), "src/generateWorker.js"), {
+      workerData: { filePath },
+    });
 
+    let wasCancelled = false;
 
-    worker.on("message", (msg) => {
+    currentWorker.on("message", (msg) => {
       if (msg.type === "progress") {
-        event.sender.send("progress-update", {
-          count: msg.count,
-          total: msg.total,
-        });
+        event.sender.send("progress-update", { count: msg.count, total: msg.total });
       } else if (msg.type === "log") {
-        event.sender.send("log-update", msg.message); // 🆕
+        event.sender.send("log-update", msg.message);
       } else if (msg.type === "done") {
+        currentWorker = null;
         resolve({
           success: true,
           message: `✅ ${msg.addedCount} added\n⚠️ ${msg.alreadyExistsCount} already existed\n❌ ${msg.errorCount} errors`,
@@ -95,18 +93,39 @@ ipcMain.handle("generate-from-csv", async (event, filePath) => {
       }
     });
 
-
-    worker.on("error", (err) => {
+    currentWorker.on("error", (err) => {
       console.error("Worker error:", err);
+      currentWorker = null;
       reject({ success: false, message: "Worker thread failed" });
     });
 
-    worker.on("exit", (code) => {
-      if (code !== 0) {
-        reject({ success: false, message: `Worker stopped with code ${code}` });
+    currentWorker.on("exit", (code) => {
+      if (code !== 0 && !wasCancelled) {
+        reject({ success: false, message: `Worker stopped unexpectedly (code ${code})` });
       }
+      if (wasCancelled) {
+        reject({ success: false, message: `⛔ Generation was cancelled.` });
+      }
+      currentWorker = null;
+    });
+
+    // expose cancel function inside the closure
+    ipcMain.once("cancel-current-worker", () => {
+      wasCancelled = true;
+      currentWorker?.terminate();
     });
   });
+});
+
+
+ipcMain.handle("cancel-generation", async () => {
+  if (currentWorker) {
+    currentWorker.terminate();
+    currentWorker = null;
+    return { success: true, message: "⛔ Generation cancelled by user." };
+  } else {
+    return { success: false, message: "No generation in progress." };
+  }
 });
 
 

@@ -1,4 +1,4 @@
-import React, {useEffect, useState} from "react";
+import React, { useEffect, useState } from "react";
 
 export default function App() {
     const [status, setStatus] = useState("Waiting for file...");
@@ -6,22 +6,25 @@ export default function App() {
     const [progress, setProgress] = useState({ count: 0, total: 0 });
     const [logMessages, setLogMessages] = useState([]);
 
+    const handleCancel = () => {
+        window.electron.cancelGeneration();
+        setStatus("⛔ Cancelling...");
+    };
+
+    useEffect(() => {
+        const logBox = document.getElementById("log-box");
+        if (logBox) logBox.scrollTop = logBox.scrollHeight;
+    }, [logMessages]);
+
     useEffect(() => {
         window.electron.onProgressUpdate(({ count, total }) => {
             setProgress({ count, total });
         });
 
         window.electron.onLogUpdate((msg) => {
-            setLogMessages(prev => [...prev, msg]);
+            setLogMessages((prev) => [...prev, msg]);
         });
     }, []);
-
-    React.useEffect(() => {
-        window.electron.onProgressUpdate(({ count, total }) => {
-            setProgress({ count, total });
-        });
-    }, []);
-
 
     const handleCsvUpload = async () => {
         setStatus("Opening file dialog...");
@@ -35,12 +38,20 @@ export default function App() {
         setStatus("Processing CSV...");
         setIsProcessing(true);
 
-        const result = await window.electron.generateFromCsv(filePath);
+        try {
+            const result = await window.electron.generateFromCsv(filePath);
 
-        if (result?.success) {
-            setStatus(result.message || "✅ All done!");
-        } else {
-            setStatus("❌ Error: " + (result?.message || "Unknown error"));
+            if (result?.success) {
+                setStatus(result.message || "✅ All done!");
+            } else {
+                setStatus("❌ Error: " + (result?.message || "Unknown error"));
+            }
+        } catch (error) {
+            const message =
+                typeof error === "object" && error?.message
+                    ? error.message
+                    : "Unknown error occurred.";
+            setStatus("❌ " + message);
         }
 
 
@@ -62,10 +73,14 @@ export default function App() {
                     onClick={handleCsvUpload}
                     disabled={isProcessing}
                     className={`px-6 py-3 font-medium rounded text-white ${
-                        isProcessing ? "bg-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"
+                        isProcessing
+                            ? "bg-gray-400 cursor-not-allowed"
+                            : "bg-blue-600 hover:bg-blue-700"
                     }`}
                 >
-                    {isProcessing ? `Processing... (${progress.count}/${progress.total})` : "Select CSV and Run"}
+                    {isProcessing
+                        ? `Processing... (${progress.count}/${progress.total})`
+                        : "Select CSV and Run"}
                 </button>
 
                 {isProcessing && (
@@ -83,13 +98,25 @@ export default function App() {
                 )}
 
                 {isProcessing && (
-                    <div className="mt-4 max-h-48 overflow-y-auto bg-gray-100 p-3 rounded text-left text-sm border border-gray-300">
+                    <button
+                        onClick={handleCancel}
+                        className="mt-4 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+                    >
+                        Stop
+                    </button>
+                )}
+
+                {/* Log output (scrollable and updated in real time) */}
+                {isProcessing && (
+                    <div
+                        id="log-box"
+                        className="mt-4 max-h-48 overflow-y-auto bg-gray-100 p-3 rounded text-left text-sm border border-gray-300"
+                    >
                         {logMessages.map((msg, index) => (
                             <div key={index} className="font-mono">{msg}</div>
                         ))}
                     </div>
                 )}
-
 
                 <div className="mt-4 text-sm text-gray-700 whitespace-pre-wrap">
                     {status}

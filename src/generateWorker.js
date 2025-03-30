@@ -22,10 +22,14 @@ function processCSV(filePath) {
     for (const id of lcscSet) {
         let status = "";
         try {
-            const result = execSync(`easyeda2kicad.exe --full --lcsc_id=${id}`, {
-                encoding: "utf-8",
-                stdio: "pipe",
-            });
+            const result = execSync(
+                `easyeda2kicad.exe --full --lcsc_id=${id}`,
+                { encoding: "utf-8" }
+            );
+
+
+            // Log raw result to understand behavior
+            parentPort.postMessage({ type: "log", message: `🖨️ ${id} OUTPUT:\n${result.trim()}` });
 
             if (result.includes("already in") || result.includes("Use --overwrite")) {
                 alreadyExistsCount++;
@@ -35,20 +39,31 @@ function processCSV(filePath) {
                 status = `✅ ${id} - Added`;
             }
         } catch (error) {
-            const stderr = error.stdout?.toString() || error.message;
-            if (stderr.includes("already in") || stderr.includes("Use --overwrite")) {
+            const output =
+                (error.stdout?.toString() || "") + "\n" +
+                (error.stderr?.toString() || "") + "\n" +
+                error.message;
+
+            parentPort.postMessage({
+                type: "log",
+                message: `❗ ${id} ERROR OUTPUT:\n${output.trim()}`
+            });
+
+            if (output.includes("already in") || output.includes("Use --overwrite")) {
                 alreadyExistsCount++;
-                status = `⚠️ ${id} - Already exists (from error)`;
+                status = `⚠️ ${id} - Already exists (caught from error)`;
             } else {
                 errorCount++;
                 status = `❌ ${id} - Error`;
             }
         }
 
+
         count++;
         parentPort.postMessage({ type: "log", message: status });
         parentPort.postMessage({ type: "progress", count, total });
     }
+
 
 
     parentPort.postMessage({
